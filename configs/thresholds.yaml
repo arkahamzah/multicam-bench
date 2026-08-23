@@ -1,0 +1,6 @@
+﻿saturation:
+  lag_p95_ms: 200
+  drop_rate_pct: 1.0
+publisher_drift_reject_ms: 50
+warmup_s: 20
+measure_s: 90
