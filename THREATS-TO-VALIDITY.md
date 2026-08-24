@@ -185,3 +185,45 @@ Stated in advance, so the project can be wrong in a way that is visible:
    the model does not generalise and the calculator is withdrawn.
 
 Each of these is reported whether or not it is the flattering outcome.
+
+
+---
+
+## 7. Known measurement-path limitations (added after v0.4)
+
+### T13 — `cv2.VideoCapture` cannot reach hardware decode on this OpenCV build (**severe**)
+
+`opencv-python-headless` (this repo's pinned wheel) reports 0 CUDA-enabled
+devices via `cv2.cuda.getCudaEnabledDeviceCount()` regardless of what GPU is
+physically installed — that wheel ships with no CUDA codec support at all. NVDEC
+is therefore unreachable through `cv2.VideoCapture`'s `CAP_PROP_HW_ACCELERATION`
+on any machine using this wheel, which is the default install for this repo. The
+`d3d11va`/`qsv`/`vaapi` acceleration flags cv2 does expose may also silently
+fall back to software decode rather than raising, which is difficult to
+distinguish from ordinary pipeline overhead by watching CPU usage alone.
+
+This removes the single most valuable axis in PROJECT-CHARTER-v2.md §2 ("backend
+decode": cpu / qsv / d3d11va / nvdec) if the RTSP/cv2 pipeline sweep
+(`bench/sweep.py`) is the only measurement path — a `cuda` data point measured
+through cv2 on this wheel is not measuring NVDEC, it is measuring software decode
+mislabelled as hardware decode.
+
+**Control.** A second, structurally separate measurement path
+(`rig/ffmpeg_decode_bench.py`, `bench/decode_only_sweep.py`,
+`multicam-bench sweep --decode-only`) benchmarks decode directly via
+`ffmpeg -hwaccel <backend> -i <file> -benchmark -f null -` as a subprocess, with
+no cv2 and no RTSP involved. This is the same acceleration path DeepStream and
+most published benchmarks use, so it is also the more externally-comparable
+number (§5 above). Its results are reported in a separate `RESULTS.md` table
+(`bench/analyze_decode_only.py`) and are never merged cell-for-cell with the
+full-pipeline table — they measure different things (raw decode throughput vs.
+effective consumer fps / ingest_lag under real RTSP ingest and queueing) and a
+merged table would misrepresent both.
+
+**Residual risk.** The decode-only path still depends on ffmpeg itself being
+built with working `-hwaccel` support for this machine's driver stack (CUDA
+toolkit / Intel Media SDK / VAAPI userspace driver). A backend reported
+"available" by `rig/backends.py` (which checks OpenCV/GPU presence, not ffmpeg's
+own hwaccel support) can still fail inside `run_ffmpeg_decode_benchmark` — that
+failure is recorded per-point (`succeeded: false`, `error`) rather than silently
+dropped, but it is not pre-empted by the availability check.

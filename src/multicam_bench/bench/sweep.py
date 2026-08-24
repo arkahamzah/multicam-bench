@@ -282,6 +282,7 @@ def run_sweep(
     thresholds_path: Path,
     run_id: str = "",
     seed: int | None = None,
+    machine_label: str = "unlabelled-machine",
 ) -> Path:
     """Run the full sweep described by `sweep_config_path`. Returns the sweep run
     directory (`runs/<run_id>/`).
@@ -292,7 +293,9 @@ def run_sweep(
     resolved_run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     sweep_dir = Path("runs") / resolved_run_id
     sweep_dir.mkdir(parents=True, exist_ok=True)
-    (sweep_dir / "env.json").write_text(json.dumps(collect_env(), indent=2), encoding="utf-8")
+    (sweep_dir / "env.json").write_text(
+        json.dumps(collect_env(machine_label=machine_label), indent=2), encoding="utf-8"
+    )
     (sweep_dir / "sweep_config.json").write_text(
         json.dumps(
             {

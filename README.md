@@ -36,6 +36,10 @@ export PATH="$PWD/tools:$PATH"
 uv sync
 ```
 
+`bench/env.py` reads `/proc/cpuinfo` for `cpu_model` on Linux (`platform.processor()`
+is blank there) and falls back to `lspci` for GPU names when `nvidia-smi` isn't
+present — both best-effort, same as the Windows paths.
+
 ## Running
 
 ```powershell
@@ -51,6 +55,10 @@ with the source about its own pace.
 Before a long run: close Chrome/Teams and anything else contending for CPU, plug in
 AC power, and let it run uninterrupted — it discards the configured warm-up window
 then measures the configured window, both read from `configs/thresholds.yaml`.
+
+This repo is published, so `runs/<id>/env.json` never records a hostname or
+username — pass `--machine-label machine-a` (`measure`/`sweep`) to give a run a
+generic, human-chosen label instead; the default is `unlabelled-machine`.
 
 ### v0.2 sweep / v0.3 analysis
 
@@ -82,7 +90,15 @@ written to `runs/<id>/backends.json`. On this repo's dev machine (Intel Iris Xe 
 NVIDIA MX550, `opencv-python-headless`), expect `ffmpeg-cpu`/`d3d11va`/`qsv`
 available and `cuda` skipped — that wheel ships with no CUDA codec support, so a
 physically-present NVIDIA GPU does not make NVDEC usable here (see
-`rig/backends.py`).
+`rig/backends.py`, THREATS-TO-VALIDITY.md T13).
+
+Since `cv2.VideoCapture` cannot reach real hardware decode on this OpenCV build,
+`multicam-bench sweep --decode-only` runs a second, structurally separate
+measurement: N concurrent `ffmpeg -hwaccel <backend> -i <file> -benchmark
+-f null -` subprocesses per (N, codec, backend), no RTSP/mediamtx/cv2 involved
+(`rig/ffmpeg_decode_bench.py`). `analyze` reports its results in their own table
+(`bench/analyze_decode_only.py`) — never merged with the full-pipeline table
+above, since the two measure different things.
 
 ### v0.5 optional detection stage
 

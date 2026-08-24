@@ -20,6 +20,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402 — backend must be set before this import
 
 from multicam_bench.bench.aggregate import MedianIQR, exclude_near_loop_boundary, median_iqr
+from multicam_bench.bench.analyze_decode_only import (
+    analyze_decode_only_sweep,
+    build_decode_only_results_section,
+    discover_decode_only_dirs,
+    summarize_decode_only,
+)
 from multicam_bench.bench.saturation import (
     SaturationResult,
     compute_n_max,
@@ -377,12 +383,16 @@ def build_results_section(
 
 def run_analyze(runs_root: Path, thresholds_path: Path, output_path: Path) -> None:
     """Discover every sweep run under `runs_root`, analyze it, and write the
-    combined `RESULTS.md` (plus one plot pair per sweep, next to its run).
+    combined `RESULTS.md` (plus one plot pair per full-pipeline sweep, next to
+    its run). Full-pipeline and decode-only (v0.4, `--decode-only`) results are
+    written as clearly separate sections with separate tables — see
+    `bench/analyze_decode_only.py` for why they must never be merged into one.
     """
     thresholds = load_thresholds(thresholds_path)
     sweep_dirs = discover_sweep_dirs(runs_root)
+    decode_only_dirs = discover_decode_only_dirs(runs_root)
 
-    if not sweep_dirs:
+    if not sweep_dirs and not decode_only_dirs:
         output_path.write_text(
             "# Results\n\nNo completed sweep runs found under `runs/`. "
             "Run `multicam-bench sweep` first.\n",
@@ -391,6 +401,7 @@ def run_analyze(runs_root: Path, thresholds_path: Path, output_path: Path) -> No
         return
 
     sections = ["# Results", ""]
+
     for sweep_dir in sweep_dirs:
         env = json.loads((sweep_dir / "env.json").read_text(encoding="utf-8"))
         sweep_config = json.loads(
@@ -416,5 +427,24 @@ def run_analyze(runs_root: Path, thresholds_path: Path, output_path: Path) -> No
                 sweep_dir, env, sweep_config, summaries, total_excluded, skipped_backends
             )
         )
+
+    if decode_only_dirs:
+        sections.append(
+            "# Decode-only benchmark results (ffmpeg subprocess — separate "
+            "measurement path, see rig/ffmpeg_decode_bench.py)"
+        )
+        sections.append("")
+        for decode_only_dir in decode_only_dirs:
+            env = json.loads((decode_only_dir / "env.json").read_text(encoding="utf-8"))
+            sweep_config = json.loads(
+                (decode_only_dir / "sweep_config.json").read_text(encoding="utf-8")
+            )
+            decode_only_results = analyze_decode_only_sweep(decode_only_dir)
+            decode_only_summaries = summarize_decode_only(decode_only_results)
+            sections.append(
+                build_decode_only_results_section(
+                    decode_only_dir, env, sweep_config, decode_only_summaries
+                )
+            )
 
     output_path.write_text("\n".join(sections), encoding="utf-8")

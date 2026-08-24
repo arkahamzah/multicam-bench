@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 
 from multicam_bench.bench.analyze import run_analyze
+from multicam_bench.bench.decode_only_sweep import run_decode_only_sweep
 from multicam_bench.bench.env import collect_env
 from multicam_bench.bench.reader import measure_stream
 from multicam_bench.bench.sweep import run_sweep
@@ -44,6 +45,11 @@ def measure(
     thresholds_path: Path = typer.Option(Path("configs/thresholds.yaml"), "--thresholds"),
     rtsp_url: str = typer.Option("rtsp://127.0.0.1:8554/cam0", "--rtsp-url"),
     run_id: str = typer.Option("", "--run-id"),
+    machine_label: str = typer.Option(
+        "unlabelled-machine",
+        "--machine-label",
+        help="generic label for env.json (never auto-detected from hostname)",
+    ),
 ) -> None:
     """Publish `video` over RTSP and measure ingest_lag / continuity for one reader.
 
@@ -59,7 +65,9 @@ def measure(
     resolved_run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     run_dir = Path("runs") / resolved_run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "env.json").write_text(json.dumps(collect_env(), indent=2), encoding="utf-8")
+    (run_dir / "env.json").write_text(
+        json.dumps(collect_env(machine_label=machine_label), indent=2), encoding="utf-8"
+    )
 
     with mediamtx_server(mediamtx_config), publisher(video, rtsp_url):
         time.sleep(2.0)  # let the publisher establish the RTSP session before reading
@@ -81,15 +89,46 @@ def sweep(
     thresholds_path: Path = typer.Option(Path("configs/thresholds.yaml"), "--thresholds"),
     run_id: str = typer.Option("", "--run-id"),
     seed: int | None = typer.Option(None, "--seed", help="seed for order randomisation"),
+    machine_label: str = typer.Option(
+        "unlabelled-machine",
+        "--machine-label",
+        help="generic label for env.json (never auto-detected from hostname)",
+    ),
+    decode_only: bool = typer.Option(
+        False,
+        "--decode-only",
+        help=(
+            "ffmpeg-subprocess decode benchmark instead of the full RTSP/cv2 "
+            "pipeline (v0.4) — see rig/ffmpeg_decode_bench.py"
+        ),
+    ),
 ) -> None:
     """Run the v0.2 N-stream sweep described by `sweep_config`.
 
     Long-running: N values × repetitions × (baseline + measured), each on its own
     warmup/measure window plus a cooldown between every run. See
     THREATS-TO-VALIDITY.md for why order is randomised and cooldown enforced.
+
+    `--decode-only` runs a structurally separate measurement instead: N
+    concurrent ffmpeg decode processes per (N, codec, backend), no RTSP/mediamtx
+    involved. This is the only path that can reach NVDEC/QSV/VAAPI on a machine
+    where `cv2.VideoCapture` cannot (THREATS-TO-VALIDITY.md's OpenCV hardware
+    decode note). `analyze` reports it in a separate table, never merged with
+    the full-pipeline results.
     """
-    sweep_dir = run_sweep(sweep_config, thresholds_path, run_id=run_id, seed=seed)
-    typer.echo(f"wrote {sweep_dir}")
+    if decode_only:
+        result_dir = run_decode_only_sweep(
+            sweep_config, run_id=run_id, seed=seed, machine_label=machine_label
+        )
+    else:
+        result_dir = run_sweep(
+            sweep_config,
+            thresholds_path,
+            run_id=run_id,
+            seed=seed,
+            machine_label=machine_label,
+        )
+    typer.echo(f"wrote {result_dir}")
 
 
 @app.command()

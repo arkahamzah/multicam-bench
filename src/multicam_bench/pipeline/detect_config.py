@@ -9,9 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from multicam_bench.pipeline.counting import CountingLine, Point
+from multicam_bench.yaml_io import load_yaml_mapping, require
 
 
 @dataclass(frozen=True)
@@ -31,20 +30,24 @@ def _point(values: Any) -> Point:
 
 
 def load_detect_config(path: Path) -> DetectConfig:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = load_yaml_mapping(path)
+    context = str(path)
 
-    line_data = data["counting_line"]
-    line = CountingLine(a=_point(line_data["a"]), b=_point(line_data["b"]))
+    line_data = require(data, "counting_line", context)
+    line = CountingLine(
+        a=_point(require(line_data, "a", f"{context}: counting_line")),
+        b=_point(require(line_data, "b", f"{context}: counting_line")),
+    )
 
-    detect_fps_values = [float(v) for v in data["detect_fps_values"]]
+    detect_fps_values = [float(v) for v in require(data, "detect_fps_values", context)]
     if not detect_fps_values:
         raise ValueError("detect_fps_values must not be empty")
 
     return DetectConfig(
-        enabled=bool(data["enabled"]),
-        detector_name=str(data["detector"]),
+        enabled=bool(require(data, "enabled", context)),
+        detector_name=str(require(data, "detector", context)),
         detect_fps_values=detect_fps_values,
         counting_line=line,
-        max_match_distance_px=float(data["max_match_distance_px"]),
-        device=str(data["device"]),
+        max_match_distance_px=float(require(data, "max_match_distance_px", context)),
+        device=str(require(data, "device", context)),
     )

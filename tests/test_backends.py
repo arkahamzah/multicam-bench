@@ -18,9 +18,14 @@ class FakeProbe:
     system: str = "Windows"
     gpus: Sequence[str] = field(default_factory=lambda: ["Intel Iris Xe Graphics"])
     cv2_attrs: set[str] = field(
-        default_factory=lambda: {"VIDEO_ACCELERATION_D3D11", "VIDEO_ACCELERATION_MFX"}
+        default_factory=lambda: {
+            "VIDEO_ACCELERATION_D3D11",
+            "VIDEO_ACCELERATION_MFX",
+            "VIDEO_ACCELERATION_VAAPI",
+        }
     )
     cuda_devices: int = 0
+    vaapi_device: bool = False
 
     def ffmpeg_on_path(self) -> bool:
         return self.ffmpeg
@@ -37,6 +42,9 @@ class FakeProbe:
     def cuda_device_count(self) -> int:
         return self.cuda_devices
 
+    def has_vaapi_device(self) -> bool:
+        return self.vaapi_device
+
 
 def test_this_laptop_profile_matches_expectations() -> None:
     # Iris Xe + MX550 + opencv-python-headless (no CUDA codec support): the exact
@@ -49,6 +57,8 @@ def test_this_laptop_profile_matches_expectations() -> None:
     assert results["qsv"].available is True
     assert results["cuda"].available is False
     assert "CUDA" in results["cuda"].reason
+    assert results["vaapi"].available is False  # Windows, not Linux
+    assert "Linux" in results["vaapi"].reason
 
 
 def test_ffmpeg_missing_is_unavailable_with_reason() -> None:
@@ -86,10 +96,38 @@ def test_cuda_available_with_gpu_and_device_count() -> None:
     assert results["cuda"].hw_acceleration is not None
 
 
+def test_vaapi_unavailable_off_linux() -> None:
+    probe = FakeProbe(system="Windows")
+    results = {b.name: b for b in detect_backends(probe)}
+    assert results["vaapi"].available is False
+    assert "Linux" in results["vaapi"].reason
+
+
+def test_vaapi_unavailable_without_opencv_support() -> None:
+    probe = FakeProbe(system="Linux", vaapi_device=True, cv2_attrs=set())
+    results = {b.name: b for b in detect_backends(probe)}
+    assert results["vaapi"].available is False
+    assert "opencv" in results["vaapi"].reason
+
+
+def test_vaapi_unavailable_without_render_device() -> None:
+    probe = FakeProbe(system="Linux", vaapi_device=False)
+    results = {b.name: b for b in detect_backends(probe)}
+    assert results["vaapi"].available is False
+    assert "/dev/dri" in results["vaapi"].reason
+
+
+def test_vaapi_available_on_linux_with_device_and_opencv_support() -> None:
+    probe = FakeProbe(system="Linux", vaapi_device=True)
+    results = {b.name: b for b in detect_backends(probe)}
+    assert results["vaapi"].available is True
+    assert results["vaapi"].hw_acceleration is not None
+
+
 def test_every_backend_name_gets_a_result_never_silently_omitted() -> None:
-    probe = FakeProbe(ffmpeg=False, system="Linux", gpus=[], cv2_attrs=set())
+    probe = FakeProbe(ffmpeg=False, system="Darwin", gpus=[], cv2_attrs=set())
     results = detect_backends(probe)
-    assert {b.name for b in results} == {"ffmpeg-cpu", "d3d11va", "qsv", "cuda"}
+    assert {b.name for b in results} == {"ffmpeg-cpu", "d3d11va", "qsv", "cuda", "vaapi"}
     assert all(not b.available for b in results)
     assert all(b.reason for b in results)
 
@@ -109,7 +147,7 @@ def test_available_backend_names_preserves_requested_order() -> None:
 def test_available_backend_names_rejects_unknown_backend() -> None:
     probe = FakeProbe()
     with pytest.raises(ValueError, match="unknown backend"):
-        available_backend_names(probe, ["vaapi"])
+        available_backend_names(probe, ["made-up-backend"])
 
 
 def test_hw_acceleration_for_ffmpeg_cpu_is_none() -> None:
@@ -135,4 +173,4 @@ def test_hw_acceleration_for_unknown_name_raises() -> None:
     probe = FakeProbe()
     backends = detect_backends(probe)
     with pytest.raises(ValueError, match="unknown backend"):
-        hw_acceleration_for("vaapi", backends)
+        hw_acceleration_for("made-up-backend", backends)

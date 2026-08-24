@@ -2,15 +2,19 @@
 decode" is a sumbu, not an assumption).
 
 Backends: `ffmpeg-cpu` (software), `d3d11va` (Windows Media Foundation / DXVA2),
-`qsv` (Intel Quick Sync, e.g. Iris Xe), `cuda` (NVDEC). Availability is best-effort
-and hardware/library based — actually opening a hardware-accelerated capture is
-what the sweep itself does; this module only decides which backends are worth
-trying and records *why* the others were skipped, per CLAUDE.md hard rule 1 ("no
-code for anything that cannot run on this machine"). In particular,
-`opencv-python-headless` (this repo's pinned OpenCV wheel) ships with no CUDA
-codec support, so `cuda` reliably reports unavailable on a machine installed from
-that wheel even when an NVIDIA GPU is physically present — that is not a bug, it
-is the wheel's real capability being reported honestly.
+`qsv` (Intel Quick Sync, e.g. Iris Xe), `cuda` (NVDEC), `vaapi` (Linux Video
+Acceleration API — the standard Intel/AMD hardware decode path on Linux, and
+`d3d11va`'s counterpart there). Availability is best-effort and hardware/library
+based — actually opening a hardware-accelerated capture is what the sweep itself
+does; this module only decides which backends are worth trying and records *why*
+the others were skipped, per CLAUDE.md hard rule 1 ("no code for anything that
+cannot run on this machine"). In particular, `opencv-python-headless` (this
+repo's pinned OpenCV wheel) ships with no CUDA codec support, so `cuda` reliably
+reports unavailable on a machine installed from that wheel even when an NVIDIA
+GPU is physically present — that is not a bug, it is the wheel's real capability
+being reported honestly. See `rig/ffmpeg_decode_bench.py` for the separate,
+ffmpeg-subprocess-based decode path that does not go through cv2 at all and can
+actually reach NVDEC/QSV/VAAPI on a machine where they work.
 """
 
 from __future__ import annotations
@@ -19,11 +23,12 @@ import platform
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import cv2
 
-BACKEND_NAMES = ("ffmpeg-cpu", "d3d11va", "qsv", "cuda")
+BACKEND_NAMES = ("ffmpeg-cpu", "d3d11va", "qsv", "cuda", "vaapi")
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class BackendProbe(Protocol):
     def gpu_names(self) -> Sequence[str]: ...
     def cv2_has_attr(self, name: str) -> bool: ...
     def cuda_device_count(self) -> int: ...
+    def has_vaapi_device(self) -> bool: ...
 
 
 class SystemBackendProbe:
@@ -68,6 +74,12 @@ class SystemBackendProbe:
             return int(cv2.cuda.getCudaEnabledDeviceCount())
         except (AttributeError, cv2.error):
             return 0
+
+    def has_vaapi_device(self) -> bool:
+        dri = Path("/dev/dri")
+        if not dri.is_dir():
+            return False
+        return any(p.name.startswith("renderD") for p in dri.iterdir())
 
 
 def detect_backends(probe: BackendProbe) -> list[BackendAvailability]:
@@ -147,6 +159,33 @@ def detect_backends(probe: BackendProbe) -> list[BackendAvailability]:
                 f"NVIDIA GPU detected + {cuda_devices} CUDA-enabled device(s) "
                 "in this opencv build",
                 cv2.VIDEO_ACCELERATION_ANY,
+            )
+        )
+
+    if probe.platform_system() != "Linux":
+        results.append(
+            BackendAvailability(
+                "vaapi", False, f"not Linux (platform={probe.platform_system()})", None
+            )
+        )
+    elif not probe.cv2_has_attr("VIDEO_ACCELERATION_VAAPI"):
+        results.append(
+            BackendAvailability(
+                "vaapi", False, "installed opencv build lacks VIDEO_ACCELERATION_VAAPI", None
+            )
+        )
+    elif not probe.has_vaapi_device():
+        results.append(
+            BackendAvailability("vaapi", False, "no /dev/dri/renderD* device found", None)
+        )
+    else:
+        results.append(
+            BackendAvailability(
+                "vaapi",
+                True,
+                "Linux + a /dev/dri render device + opencv build supports "
+                "VIDEO_ACCELERATION_VAAPI",
+                cv2.VIDEO_ACCELERATION_VAAPI,
             )
         )
 

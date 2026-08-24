@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+from multicam_bench.yaml_io import load_yaml_mapping, require
 
 # THREATS-TO-VALIDITY.md T3: minimum repetitions for a variance estimate.
 MIN_REPETITIONS = 3
@@ -30,18 +30,19 @@ class SweepConfig:
 
 def load_sweep_config(path: Path) -> SweepConfig:
     """Parse a sweep YAML file into a `SweepConfig` instance."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = load_yaml_mapping(path)
+    context = str(path)
 
-    repetitions = int(data["repetitions"])
+    repetitions = int(require(data, "repetitions", context))
     if repetitions < MIN_REPETITIONS:
         raise ValueError(
             f"repetitions must be >= {MIN_REPETITIONS} (THREATS-TO-VALIDITY.md T3), "
             f"got {repetitions}"
         )
 
-    n_values = [int(n) for n in data["n_values"]]
-    codecs = [str(c) for c in data["codecs"]]
-    backends = [str(b) for b in data["backends"]]
+    n_values = [int(n) for n in require(data, "n_values", context)]
+    codecs = [str(c) for c in require(data, "codecs", context)]
+    backends = [str(b) for b in require(data, "backends", context)]
     if not n_values:
         raise ValueError("n_values must not be empty")
     if not codecs:
@@ -54,10 +55,10 @@ def load_sweep_config(path: Path) -> SweepConfig:
         codecs=codecs,
         backends=backends,
         repetitions=repetitions,
-        cooldown_s=float(data["cooldown_s"]),
-        resolution=str(data["resolution"]),
-        fps=int(data["fps"]),
-        duration_s=float(data["duration_s"]),
-        rtsp_base_url=str(data["rtsp_base_url"]),
-        mediamtx_config=Path(data["mediamtx_config"]),
+        cooldown_s=float(require(data, "cooldown_s", context)),
+        resolution=str(require(data, "resolution", context)),
+        fps=int(require(data, "fps", context)),
+        duration_s=float(require(data, "duration_s", context)),
+        rtsp_base_url=str(require(data, "rtsp_base_url", context)),
+        mediamtx_config=Path(require(data, "mediamtx_config", context)),
     )
