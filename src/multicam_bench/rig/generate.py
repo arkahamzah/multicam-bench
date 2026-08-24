@@ -6,12 +6,22 @@ import subprocess
 from pathlib import Path
 
 from multicam_bench.rig.marker import build_filter
+from multicam_bench.rig.resolution import validate_codec
 
 
 def generate_test_video(
-    output: Path, width: int, height: int, fps: int, duration: float
+    output: Path,
+    width: int,
+    height: int,
+    fps: int,
+    duration: float,
+    codec: str = "libx264",
 ) -> Path:
-    """Run ffmpeg with the marker filter, writing an libx264 test clip to `output`."""
+    """Run ffmpeg with the marker filter, writing a `codec`-encoded test clip to
+    `output`. `codec` must be one of `rig.resolution.CODECS` (libx264/libx265) —
+    Ultralytics/DeepStream are never involved here, this is plain ffmpeg encoding.
+    """
+    validate_codec(codec)
     output.parent.mkdir(parents=True, exist_ok=True)
     filter_str = build_filter(width, height, fps, duration)
     cmd = [
@@ -24,7 +34,7 @@ def generate_test_video(
         "-frames:v",
         str(round(fps * duration)),
         "-c:v",
-        "libx264",
+        codec,
         "-pix_fmt",
         "yuv420p",
         str(output),

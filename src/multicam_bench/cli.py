@@ -10,8 +10,10 @@ from pathlib import Path
 
 import typer
 
+from multicam_bench.bench.analyze import run_analyze
 from multicam_bench.bench.env import collect_env
 from multicam_bench.bench.reader import measure_stream
+from multicam_bench.bench.sweep import run_sweep
 from multicam_bench.config import load_thresholds
 from multicam_bench.rig.generate import generate_test_video
 from multicam_bench.rig.probe import probe_video
@@ -27,9 +29,10 @@ def gen(
     height: int = typer.Option(360, "--height"),
     fps: int = typer.Option(30, "--fps"),
     duration: float = typer.Option(60.0, "--duration"),
+    codec: str = typer.Option("libx264", "--codec", help="libx264 or libx265"),
 ) -> None:
     """Generate the marked test video used as the publisher's source."""
-    path = generate_test_video(output, width, height, fps, duration)
+    path = generate_test_video(output, width, height, fps, duration, codec=codec)
     typer.echo(f"wrote {path}")
 
 
@@ -69,6 +72,34 @@ def measure(
         )
 
     typer.echo(f"wrote {result.samples_path} ({result.frames_measured} samples)")
+
+
+@app.command()
+def sweep(
+    sweep_config: Path = typer.Option(Path("configs/sweep.yaml"), "--sweep-config"),
+    thresholds_path: Path = typer.Option(Path("configs/thresholds.yaml"), "--thresholds"),
+    run_id: str = typer.Option("", "--run-id"),
+    seed: int | None = typer.Option(None, "--seed", help="seed for order randomisation"),
+) -> None:
+    """Run the v0.2 N-stream sweep described by `sweep_config`.
+
+    Long-running: N values × repetitions × (baseline + measured), each on its own
+    warmup/measure window plus a cooldown between every run. See
+    THREATS-TO-VALIDITY.md for why order is randomised and cooldown enforced.
+    """
+    sweep_dir = run_sweep(sweep_config, thresholds_path, run_id=run_id, seed=seed)
+    typer.echo(f"wrote {sweep_dir}")
+
+
+@app.command()
+def analyze(
+    runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
+    thresholds_path: Path = typer.Option(Path("configs/thresholds.yaml"), "--thresholds"),
+    output: Path = typer.Option(Path("RESULTS.md"), "--output"),
+) -> None:
+    """Aggregate every sweep run under `runs_root` into `RESULTS.md` (v0.3)."""
+    run_analyze(runs_root, thresholds_path, output)
+    typer.echo(f"wrote {output}")
 
 
 def main() -> None:

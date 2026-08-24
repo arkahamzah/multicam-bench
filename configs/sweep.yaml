@@ -1,0 +1,10 @@
+n_values: [1, 2, 4, 8, 12, 16]
+repetitions: 3
+cooldown_s: 60
+content:
+  resolution: 360p
+  codec: libx264
+  fps: 30
+  duration_s: 60
+rtsp_base_url: rtsp://127.0.0.1:8554
+mediamtx_config: tools/mediamtx.yml
