@@ -9,6 +9,12 @@ thread doing `cv2.VideoCapture.read()`), decoupled from measurement via a
 it" (a queue eviction, counted here as `queue_drops`) into a number distinct from
 "the decoder skipped it" (an embedded-index gap — see bench/lag.py), per
 THREATS-TO-VALIDITY.md T6.
+
+v0.5 adds an optional detection stage: when `detector` is given, frames whose
+0-based measured-frame index is in `detect_gate` (see pipeline/gating.py) are run
+through it and their centroid detections accumulated for line-crossing counting
+(pipeline/counting.py). Every parameter defaults to `None`/off, so a plain
+decode-capacity reader (v0.1–v0.4) is completely unaffected.
 """
 
 from __future__ import annotations
@@ -26,6 +32,8 @@ import numpy as np
 
 from multicam_bench.bench.lag import Anchor, LoopUnwrapper, ingest_lag_s
 from multicam_bench.bench.queue_policy import BoundedDropOldestQueue
+from multicam_bench.pipeline.counting import CountingLine, Detection, count_crossings
+from multicam_bench.pipeline.detector import Detector
 from multicam_bench.rig.marker import read_index
 
 
@@ -42,6 +50,8 @@ class CameraResult:
     frames_received: int
     frames_measured: int
     queue_drops: int
+    frames_detected: int | None = None
+    crossing_count: int | None = None
 
 
 def _capture_loop(
@@ -67,13 +77,28 @@ def run_camera_reader(
     measure_s: float,
     queue_maxsize: int = 1,
     get_timeout_s: float = 10.0,
+    hw_acceleration: int | None = None,
+    detector: Detector | None = None,
+    detect_gate: frozenset[int] | None = None,
+    counting_line: CountingLine | None = None,
+    max_match_distance_px: float = 80.0,
 ) -> CameraResult:
     """Read `rtsp_url` for this one camera, discard `warmup_s`, then record
     `measure_s` of samples to `samples_path`. Blocks until measurement completes,
     the stream ends, or no frame arrives within `get_timeout_s`.
+
+    `hw_acceleration` is a `cv2.VIDEO_ACCELERATION_*` constant (v0.4 decode-backend
+    axis, see rig/backends.py) — it must be set before `open()`, so the capture is
+    constructed empty rather than opened in the constructor. `None` means software
+    decode (`ffmpeg-cpu`), the v0.1–v0.3 behaviour.
+
+    `detector`/`detect_gate`/`counting_line` are the v0.5 optional detection stage —
+    all default to `None`, which skips detection entirely (v0.1–v0.4 behaviour).
     """
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-    if not cap.isOpened():
+    cap = cv2.VideoCapture()
+    if hw_acceleration is not None:
+        cap.set(cv2.CAP_PROP_HW_ACCELERATION, hw_acceleration)
+    if not cap.open(rtsp_url, cv2.CAP_FFMPEG):
         raise RuntimeError(f"camera {camera_id}: could not open {rtsp_url}")
 
     frame_queue: BoundedDropOldestQueue[CapturedFrame] = BoundedDropOldestQueue(
@@ -91,6 +116,7 @@ def run_camera_reader(
     frames_received = 0
     frames_measured = 0
     last_frame_index: int | None = None
+    detected_frames: list[list[Detection]] = []
 
     samples_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -120,11 +146,26 @@ def run_camera_reader(
                 last_frame_index = frame_index
                 lag = ingest_lag_s(anchor, frame_index, t_recv, fps_source)
                 writer.writerow([frame_index, raw_index, t_recv, lag, gap])
+
+                if detector is not None and detect_gate is not None:
+                    if frames_measured in detect_gate:
+                        boxes = detector.detect(captured.frame)
+                        detected_frames.append([b.to_centroid_detection() for b in boxes])
+
                 frames_measured += 1
     finally:
         stop.set()
         cap.release()
         capture_thread.join(timeout=5.0)
+
+    frames_detected: int | None = None
+    crossing_count: int | None = None
+    if detector is not None:
+        frames_detected = len(detected_frames)
+        if counting_line is not None:
+            crossing_count = count_crossings(
+                detected_frames, counting_line, max_match_distance_px
+            )
 
     return CameraResult(
         camera_id=camera_id,
@@ -132,6 +173,8 @@ def run_camera_reader(
         frames_received=frames_received,
         frames_measured=frames_measured,
         queue_drops=frame_queue.drops,
+        frames_detected=frames_detected,
+        crossing_count=crossing_count,
     )
 
 
@@ -144,10 +187,20 @@ def camera_process_entry(
     warmup_s: float,
     measure_s: float,
     summary_path: Path,
+    backend: str = "ffmpeg-cpu",
+    hw_acceleration: int | None = None,
+    detector: Detector | None = None,
+    detect_gate: frozenset[int] | None = None,
+    counting_line: CountingLine | None = None,
+    max_match_distance_px: float = 80.0,
 ) -> None:
     """`multiprocessing.Process` target: run this camera's reader and write its
     result as JSON to `summary_path`, so the parent (which spawned this process
     with Windows `spawn`, not `fork`) can recover the result without a pipe.
+    `backend` is recorded for provenance only — `hw_acceleration` is what actually
+    configures the capture (see rig/backends.py for the name-to-flag mapping).
+    `detector`/`detect_gate`/`counting_line` are the v0.5 optional detection stage,
+    all `None` by default.
     """
     result = run_camera_reader(
         camera_id=camera_id,
@@ -157,6 +210,11 @@ def camera_process_entry(
         period_frames=period_frames,
         warmup_s=warmup_s,
         measure_s=measure_s,
+        hw_acceleration=hw_acceleration,
+        detector=detector,
+        detect_gate=detect_gate,
+        counting_line=counting_line,
+        max_match_distance_px=max_match_distance_px,
     )
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(
@@ -167,6 +225,9 @@ def camera_process_entry(
                 "frames_received": result.frames_received,
                 "frames_measured": result.frames_measured,
                 "queue_drops": result.queue_drops,
+                "backend": backend,
+                "frames_detected": result.frames_detected,
+                "crossing_count": result.crossing_count,
             },
             indent=2,
         ),

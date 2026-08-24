@@ -1,6 +1,6 @@
-"""Loads `configs/sweep.yaml`: the N sweep, repetition count, cooldown, and default
-test content (resolution/codec/fps/duration) for the v0.2 sweep orchestrator.
-Mirrors `config.py`'s contract for thresholds.yaml — read only, never written here.
+"""Loads `configs/sweep.yaml`: the N sweep, codec axis, backend axis, repetition
+count, cooldown, and test content for the v0.2/v0.4 sweep orchestrator. Mirrors
+`config.py`'s contract for thresholds.yaml — read only, never written here.
 """
 
 from __future__ import annotations
@@ -15,19 +15,15 @@ MIN_REPETITIONS = 3
 
 
 @dataclass(frozen=True)
-class ContentSpec:
-    resolution: str
-    codec: str
-    fps: int
-    duration_s: float
-
-
-@dataclass(frozen=True)
 class SweepConfig:
     n_values: list[int]
+    codecs: list[str]
+    backends: list[str]
     repetitions: int
     cooldown_s: float
-    content: ContentSpec
+    resolution: str
+    fps: int
+    duration_s: float
     rtsp_base_url: str
     mediamtx_config: Path
 
@@ -43,19 +39,25 @@ def load_sweep_config(path: Path) -> SweepConfig:
             f"got {repetitions}"
         )
 
-    content_data = data["content"]
-    content = ContentSpec(
-        resolution=str(content_data["resolution"]),
-        codec=str(content_data["codec"]),
-        fps=int(content_data["fps"]),
-        duration_s=float(content_data["duration_s"]),
-    )
+    n_values = [int(n) for n in data["n_values"]]
+    codecs = [str(c) for c in data["codecs"]]
+    backends = [str(b) for b in data["backends"]]
+    if not n_values:
+        raise ValueError("n_values must not be empty")
+    if not codecs:
+        raise ValueError("codecs must not be empty")
+    if not backends:
+        raise ValueError("backends must not be empty")
 
     return SweepConfig(
-        n_values=[int(n) for n in data["n_values"]],
+        n_values=n_values,
+        codecs=codecs,
+        backends=backends,
         repetitions=repetitions,
         cooldown_s=float(data["cooldown_s"]),
-        content=content,
+        resolution=str(data["resolution"]),
+        fps=int(data["fps"]),
+        duration_s=float(data["duration_s"]),
         rtsp_base_url=str(data["rtsp_base_url"]),
         mediamtx_config=Path(data["mediamtx_config"]),
     )

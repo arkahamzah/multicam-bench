@@ -1,10 +1,14 @@
 n_values: [1, 2, 4, 8, 12, 16]
+codecs: [libx264, libx265]
+# Requested backends — unavailable ones are auto-detected and skipped at sweep
+# time, with the reason written to runs/<id>/backends.json (PROJECT-CHARTER-v2.md
+# §2, CLAUDE.md hard rule 1). This laptop (Iris Xe + MX550 + opencv-python-headless)
+# is expected to skip "cuda": that wheel has no CUDA codec support.
+backends: [ffmpeg-cpu, d3d11va, qsv, cuda]
 repetitions: 3
 cooldown_s: 60
-content:
-  resolution: 360p
-  codec: libx264
-  fps: 30
-  duration_s: 60
+resolution: 360p
+fps: 30
+duration_s: 60
 rtsp_base_url: rtsp://127.0.0.1:8554
 mediamtx_config: tools/mediamtx.yml

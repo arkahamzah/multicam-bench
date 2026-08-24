@@ -15,6 +15,7 @@ from multicam_bench.bench.env import collect_env
 from multicam_bench.bench.reader import measure_stream
 from multicam_bench.bench.sweep import run_sweep
 from multicam_bench.config import load_thresholds
+from multicam_bench.model.calculator import run_calc
 from multicam_bench.rig.generate import generate_test_video
 from multicam_bench.rig.probe import probe_video
 from multicam_bench.rig.publisher import mediamtx_server, publisher
@@ -100,6 +101,34 @@ def analyze(
     """Aggregate every sweep run under `runs_root` into `RESULTS.md` (v0.3)."""
     run_analyze(runs_root, thresholds_path, output)
     typer.echo(f"wrote {output}")
+
+
+@app.command()
+def calc(
+    cameras: int = typer.Option(..., "--cameras"),
+    resolution: str = typer.Option(..., "--resolution", help="360p, 720p, or 1080p"),
+    fps: float = typer.Option(..., "--fps", help="required input, never inferred (T9)"),
+    machine: str = typer.Option(
+        ...,
+        "--machine",
+        help="profile name (configs/machines/<name>.json) or a direct path to one",
+    ),
+) -> None:
+    """v0.6 capacity calculator: does `cameras` streams at `resolution`/`fps` fit
+    on `machine`? Reports the limiting subsystem and per-subsystem headroom.
+
+    Needs a machine profile built from real sweep data — none ships with this
+    repo, since CLAUDE.md hard rule 5 forbids a stream count without its machine,
+    and no sweep has been run here yet.
+    """
+    profile_path = Path(machine)
+    if not profile_path.is_file():
+        profile_path = Path("configs/machines") / f"{machine}.json"
+    try:
+        output = run_calc(profile_path, cameras, resolution, fps)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(output)
 
 
 def main() -> None:

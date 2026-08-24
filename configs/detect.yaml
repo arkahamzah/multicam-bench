@@ -1,0 +1,26 @@
+# v0.5 optional detection stage — disabled by default. A decode-capacity sweep
+# never touches this file; it only matters once the accuracy axis is turned on.
+enabled: false
+
+# RT-DETRv2 via transformers (Apache-2.0). This is the smallest published
+# checkpoint, but even it may not fit in 2GB VRAM (this repo's MX550) alongside a
+# live decode workload — that is a known, documented limitation, not a promise it
+# runs well here. Requires `uv sync --extra detect`.
+detector: PekingU/rtdetr_v2_r18vd
+
+# Detection fps is swept independently of decode fps (PROJECT-CHARTER-v2.md §2).
+detect_fps_values: [1, 2, 5, 10, 25]
+
+# Normalised [0,1] x [0,1] image coordinates — a horizontal line across the middle
+# of the frame by default. Adjust per test content.
+counting_line:
+  a: [0.0, 0.5]
+  b: [1.0, 0.5]
+
+# Max centroid distance (pixels) for associating a detection across two
+# consecutive detected frames — see pipeline/counting.py::associate_nearest.
+max_match_distance_px: 80
+
+# "cuda" is tried and falls back to "cpu" if torch reports no CUDA device
+# (recorded, not silently hidden) — see pipeline/detector.py.
+device: cpu
