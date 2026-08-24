@@ -9,3 +9,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+auto.crt
+auto.key
+*.key
+*.crt
+
+auto.crt
+auto.key
+*.key
+*.pem
+data/
+
